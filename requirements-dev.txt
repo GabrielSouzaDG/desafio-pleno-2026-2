@@ -1,0 +1,6 @@
+# Sugestao de dependencias para a ingestao. Fique a vontade para trocar.
+requests==2.32.3
+boto3==1.35.76
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+pytest==8.3.4

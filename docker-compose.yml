@@ -1,0 +1,168 @@
+name: desafio-lakehouse
+
+services:
+  # ------------------------------------------------------------ object store
+  minio:
+    image: minio/minio:latest
+    container_name: dl-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_DOMAIN: minio
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"       # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # Console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [lakehouse]
+
+  # cria os buckets e encerra
+  minio-init:
+    image: minio/mc:latest
+    container_name: dl-minio-init
+    depends_on:
+      minio: {condition: service_healthy}
+    entrypoint: ["/bin/sh", "/scripts/minio-init.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - ./scripts:/scripts:ro
+    networks: [lakehouse]
+
+  # ------------------------------------------------------- catálogo Iceberg
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: dl-iceberg-rest
+    depends_on:
+      minio-init: {condition: service_completed_successfully}
+    ports:
+      - "${ICEBERG_REST_PORT:-8181}:8181"
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://lakehouse/warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    networks: [lakehouse]
+
+  # -------------------------------------------------------- processamento
+  spark:
+    # imagem própria: a tabulario/spark-iceberg não traz o hadoop-aws,
+    # sem o qual `s3a://` não existe. Ver conf/spark/Dockerfile.
+    build: ./conf/spark
+    image: desafio-lakehouse/spark-iceberg:local
+    container_name: dl-spark
+    depends_on:
+      iceberg-rest: {condition: service_started}
+      minio: {condition: service_healthy}
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_REGION: us-east-1
+    ports:
+      - "${JUPYTER_PORT:-8888}:8888"        # Jupyter (opcional)
+      - "${SPARK_UI_PORT:-4041}:4040"       # Spark UI do job em execução
+      - "${THRIFT_PORT:-10000}:10000"        # Thrift
+    volumes:
+      - ./conf/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./:/home/iceberg/work            # o repositório inteiro fica visível aqui
+      - spark-events:/home/iceberg/spark-events
+    networks: [lakehouse]
+
+  # ---------------------------------------------------------------- OLAP
+  trino:
+    image: trinodb/trino:450
+    container_name: dl-trino
+    depends_on:
+      iceberg-rest: {condition: service_started}
+    ports:
+      - "${TRINO_PORT:-8080}:8080"
+    volumes:
+      - ./conf/trino/catalog:/etc/trino/catalog:ro
+    healthcheck:
+      test: ["CMD", "trino", "--execute", "SELECT 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    networks: [lakehouse]
+
+  # ------------------------------------------------------------ fonte: OLTP
+  postgres:
+    image: postgres:16
+    container_name: dl-postgres
+    environment:
+      POSTGRES_USER: ${PG_USER:-app}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-app}
+      POSTGRES_DB: ${PG_DATABASE:-crm}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # ATENÇÃO: só 01 e 02 rodam no init. O 03 (batch 2) é aplicado por `make batch2`.
+      - ./seed/postgres/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./seed/postgres/02_customers.sql:/docker-entrypoint-initdb.d/02_customers.sql:ro
+      - ./seed/postgres:/seed:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-app} -d ${PG_DATABASE:-crm}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [lakehouse]
+
+  # ------------------------------------------------------------- fonte: API
+  mock-api:
+    build: ./mock-api
+    container_name: dl-mock-api
+    environment:
+      API_KEY: ${API_KEY:-desafio-2026}
+      DATA_FILE: /data/events.jsonl
+      STATE_FILE: /data/.batch_state
+      FLAKY_RATE: ${FLAKY_RATE:-0.02}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./mock-api/data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [lakehouse]
+
+  # -------------------------------------------- orquestração (perfil opcional)
+  airflow:
+    image: apache/airflow:2.10.5
+    container_name: dl-airflow
+    profiles: ["airflow"]
+    command: bash -c "airflow standalone"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    ports:
+      - "${AIRFLOW_PORT:-8081}:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow-data:/opt/airflow
+    networks: [lakehouse]
+
+volumes:
+  minio-data:
+  pg-data:
+  spark-events:
+  airflow-data:
+
+networks:
+  lakehouse:
+    name: lakehouse

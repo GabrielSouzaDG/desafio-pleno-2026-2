@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.ipynb_checkpoints/
+.DS_Store
+
+# estado local da Mock API
+mock-api/data/.batch_state
+
+# artefatos gerados
+seed/postgres/02_customers.sql
+seed/postgres/03_batch2.sql
+mock-api/data/events.jsonl
+
+# NAO versionar o gabarito se este repo for para o candidato
+# seed/GABARITO.md
+
+# gabarito do avaliador — nunca versionar no repo do candidato
+seed/GABARITO*.md
