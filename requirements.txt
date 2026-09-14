@@ -1,0 +1,21 @@
+# Ingestão
+requests==2.32.3
+urllib3==2.2.3
+boto3==1.35.36
+psycopg2-binary==2.9.9
+pydantic==2.9.2
+
+# Transformação / dados
+pyspark==3.5.3
+pandas==2.2.3
+
+# Orquestração (apenas para validar o DAG localmente; não obrigatório rodar)
+apache-airflow==2.10.5
+
+# Testes
+pytest==8.3.3
+pytest-mock==3.14.0
+
+# Qualidade / utilidades
+python-dateutil==2.9.0.post0
+tenacity==9.0.0

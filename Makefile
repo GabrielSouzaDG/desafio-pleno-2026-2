@@ -102,4 +102,28 @@ airflow: ## sobe o Airflow (perfil opcional) em http://localhost:8081
 api-docs: ## lembra a URL da documentacao da Mock API
 	@echo "http://localhost:8000/docs  (header X-API-Key: $(API_KEY))"
 
-.PHONY: help seed up down clean restart ps logs check rebuild-spark test-infra test-infra-fast batch2 reset-batch batch-state spark pyspark spark-sql trino psql airflow api-docs
+ingest: ## roda a ingestao completa (Mock API + Postgres -> raw zone no MinIO)
+	python3 -m ingestion.ingest
+
+transform: ## roda bronze e silver em sequencia (dentro do container Spark)
+	docker compose exec -T spark spark-submit /home/iceberg/work/transform/bronze.py
+	docker compose exec -T spark spark-submit /home/iceberg/work/transform/silver.py
+
+quality: ## roda os checks de qualidade e persiste o resultado (para o pipeline se algum critical falhar)
+	docker compose exec -T spark spark-submit /home/iceberg/work/quality/checks.py
+
+gold: ## roda as tabelas gold (dentro do container Spark) -- so faz sentido depois de "quality" passar
+	docker compose exec -T spark spark-submit /home/iceberg/work/transform/gold.py
+
+pipeline: ingest transform quality gold ## roda o pipeline completo: ingest -> bronze+silver -> quality -> gold
+	@echo "pipeline completo. Se chegou aqui, nenhum quality check critical falhou."
+
+test: ## roda os testes que nao precisam de Spark (host, requer requirements.txt instalado)
+	python3 -m pytest tests/test_ingestion.py -v
+
+test-transforms: ## roda os testes que precisam de Spark+Iceberg (dentro do container Spark)
+	docker compose exec -T spark python3 -m pytest /home/iceberg/work/tests/test_transforms.py -v
+
+test-all: test test-transforms ## roda a suite inteira (host + container Spark)
+
+.PHONY: help seed up down clean restart ps logs check rebuild-spark test-infra test-infra-fast batch2 reset-batch batch-state spark pyspark spark-sql trino psql airflow api-docs ingest transform quality gold pipeline test test-transforms test-all
