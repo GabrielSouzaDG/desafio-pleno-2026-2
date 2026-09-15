@@ -19,7 +19,29 @@ echo "Verificando o ambiente do desafio"
 echo "---------------------------------"
 
 check "MinIO respondendo (9000)"        curl -sf http://localhost:9000/minio/health/live
-check "Console do MinIO (9001)"          curl -sf -o /dev/null http://localhost:9001
+# O healthcheck do container MinIO (mc ready local) valida a API S3, nao
+# o servidor web do console -- o container pode reportar "healthy" antes
+# do console (9001) terminar de subir. Descoberto rodando `make check`
+# de verdade logo apos um `make up`: falhava ali, mas o mesmo curl direto
+# alguns segundos depois sempre respondia 200. Mesmo padrao de retry ja
+# usado abaixo para "Mock API retorna eventos".
+minio_console() {
+  local i
+  # 15 tentativas / 30s nao foi suficiente na pratica (confirmado: falhou
+  # mesmo isolado, sem concorrencia com outro processo mexendo no
+  # ambiente). O console as vezes demora bem mais que a API (9000) pra
+  # ficar respondendo de forma consistente logo apos um `make up` com
+  # rebuild. Aumentado pra uma margem bem folgada -- so espera o tempo
+  # todo se realmente precisar, retorna assim que responder.
+  for i in $(seq 1 60); do
+    if curl -sf -o /dev/null http://localhost:9001; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+check "Console do MinIO (9001)"          minio_console
 check "Catalogo Iceberg REST (8181)"     curl -sf http://localhost:8181/v1/config?warehouse=s3://lakehouse/warehouse
 check "Mock API (8000)"                  curl -sf http://localhost:8000/health
 check "Mock API exige API key"           bash -c '[ "$(curl -s -o /dev/null -w %{http_code} http://localhost:8000/events)" = "401" ]'

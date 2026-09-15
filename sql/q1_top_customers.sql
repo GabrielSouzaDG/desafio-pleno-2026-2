@@ -14,6 +14,13 @@
 --
 -- Fonte: lakehouse.gold.events_daily_summary (pré-agregado por dia,
 -- evita re-escanear/re-contar todo lakehouse.silver.events aqui).
+--
+-- ORDER BY tem customer_id como desempate: sem isso, dois clientes com o
+-- MESMO event_count (aconteceu de verdade neste dataset -- c_0034 e
+-- c_0116 empatam em 78) podem trocar de posição entre execuções, porque
+-- SQL não garante ordem estável para empate sem uma coluna extra no
+-- ORDER BY. Descoberto comparando o resultado desta query rodada em dois
+-- momentos diferentes contra o resultado já salvo em sql/results/.
 
 WITH bounds AS (
     SELECT MAX(event_date) AS max_date
@@ -39,5 +46,5 @@ FROM last_30_days l
 LEFT JOIN lakehouse.silver.customers c
   ON c.customer_id = l.customer_id
  AND c.is_current = true
-ORDER BY l.event_count DESC
+ORDER BY l.event_count DESC, l.customer_id ASC
 LIMIT 10;
