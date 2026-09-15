@@ -67,10 +67,18 @@ def _to_jsonable(value: Any) -> Any:
 class PostgresClient:
     """Cliente de leitura incremental de `crm.customers`.
 
-    Parâmetros de conexão via env vars, com defaults que já casam com o
-    docker-compose deste repo (funciona "de fábrica" rodando do host):
-      POSTGRES_HOST=localhost, POSTGRES_PORT=5432, POSTGRES_DB=crm,
-      POSTGRES_USER=app, POSTGRES_PASSWORD=app
+    Parâmetros de conexão via env vars — usando deliberadamente os MESMOS
+    nomes que `.env`/`docker-compose.yml` já usam para o Postgres
+    (`PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, `PG_PASSWORD`), não um
+    prefixo `POSTGRES_*` inventado à parte. As duas versões anteriores
+    deste arquivo usavam `POSTGRES_PORT` etc., que nunca era lido de lugar
+    nenhum — quem muda a porta do Postgres no `.env` (`PG_PORT`, por causa
+    de conflito de porta local, ver README) mexe só na variável que o
+    `docker-compose` já usa, e o cliente Python precisa entender essa
+    MESMA variável, não uma equivalente com nome diferente.
+
+    Defaults: PG_HOST=localhost, PG_PORT=5432, PG_DATABASE=crm,
+    PG_USER=app, PG_PASSWORD=app
     """
 
     def __init__(
@@ -81,11 +89,11 @@ class PostgresClient:
         user: str | None = None,
         password: str | None = None,
     ):
-        self.host = host or os.environ.get("POSTGRES_HOST", "localhost")
-        self.port = int(port or os.environ.get("POSTGRES_PORT", 5432))
-        self.dbname = dbname or os.environ.get("POSTGRES_DB", "crm")
-        self.user = user or os.environ.get("POSTGRES_USER", "app")
-        self.password = password or os.environ.get("POSTGRES_PASSWORD", "app")
+        self.host = host or os.environ.get("PG_HOST", "localhost")
+        self.port = int(port or os.environ.get("PG_PORT", 5432))
+        self.dbname = dbname or os.environ.get("PG_DATABASE", "crm")
+        self.user = user or os.environ.get("PG_USER", "app")
+        self.password = password or os.environ.get("PG_PASSWORD", "app")
 
     def _connect(self):
         return psycopg2.connect(

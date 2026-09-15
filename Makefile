@@ -2,6 +2,20 @@
 SHELL := /bin/bash
 API_KEY ?= desafio-2026
 
+# Carrega o .env (se existir) e EXPORTA todas as variaveis pro ambiente de
+# toda recipe deste Makefile. Sem isso, "docker compose" ve o .env
+# automaticamente (comportamento nativo dele), mas alvos que rodam Python
+# direto no host (ingest, test) NAO viam nada do .env -- PG_PORT=55432,
+# por exemplo, era ignorado por `ingestion/postgres_client.py`, e
+# `make ingest`/`make pipeline` quebravam com psycopg2.OperationalError
+# em qualquer maquina com esse conflito de porta. So achei isso rodando
+# `make pipeline` de verdade (nao bastava eu ter testado o script Python
+# direto, com a variavel exportada na mao).
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
 help: ## mostra esta ajuda
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 

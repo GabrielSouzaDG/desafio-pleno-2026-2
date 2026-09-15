@@ -60,8 +60,11 @@ make test-infra-fast    # sem o round-trip do Spark (~20s)
 > `PG_PORT=55432` porque, nesta máquina, havia um PostgreSQL nativo do
 > Windows ocupando a 5432 e "roubando" a conexão silenciosamente (erro
 > `OperationalError` sem mensagem). Se a sua máquina não tem esse
-> conflito, pode comentar essa linha e usar a 5432 padrão — nada no
-> código depende do valor, é só a variável `POSTGRES_PORT`/`PG_PORT`.
+> conflito, pode comentar essa linha e usar a 5432 padrão. `PG_PORT` é a
+> única variável que importa — usada tanto pelo `docker-compose.yml`
+> quanto por `ingestion/postgres_client.py`, e `make ingest`/`make
+> pipeline` carregam o `.env` automaticamente antes de rodar (ver
+> Makefile) — não precisa exportar nada manualmente.
 
 ### Bucket e catálogo
 
