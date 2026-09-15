@@ -2,6 +2,17 @@
 SHELL := /bin/bash
 API_KEY ?= desafio-2026
 
+# No Git Bash/MSYS (Windows), argumentos de linha de comando que PARECEM
+# um caminho absoluto Unix (ex.: "-f /seed/03_batch2.sql") sao reescritos
+# automaticamente para um caminho Windows ANTES de chegar no `docker`,
+# porque `docker.exe` e um binario nativo do Windows, nao MSYS -- vira
+# algo como "C:/Program Files/Git/seed/03_batch2.sql", que obviamente nao
+# existe dentro do container Linux. MSYS_NO_PATHCONV=1 desliga essa
+# conversao. Inofensivo em Linux/Mac (a variavel simplesmente nao
+# significa nada la). Achado rodando `make batch2` de verdade, pelo
+# Git Bash, sem nenhum atalho manual.
+export MSYS_NO_PATHCONV := 1
+
 # Carrega o .env (se existir) e EXPORTA todas as variaveis pro ambiente de
 # toda recipe deste Makefile. Sem isso, "docker compose" ve o .env
 # automaticamente (comportamento nativo dele), mas alvos que rodam Python
