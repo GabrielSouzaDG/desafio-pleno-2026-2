@@ -280,11 +280,58 @@ Em ordem de prioridade real (não por categoria do enunciado):
    dono, SLA de frescor, o que consome cada uma) — hoje essa informação
    está espalhada em comentários de código; um contrato formal facilitaria
    detectar automaticamente o tipo de desalinhamento que
-   `CHECK_DOMAIN_VALUES` encontrou manualmente neste desafio (ver README,
-   "Estado atual dos quality checks").
+   `CHECK_DOMAIN_VALUES` encontrou manualmente neste desafio (achado real,
+   já corrigido — ver seção "Severidade dos quality checks" abaixo; o
+   ponto aqui é que um contrato formal pegaria isso sem precisar de
+   alguém rodar o pipeline e olhar o log pra descobrir).
 9. **Rodar a DAG do Airflow de ponta a ponta**, não só validar o
    parsing — exigiria ou empacotar uma imagem Airflow com Spark completo,
    ou trocar `PythonOperator`+`subprocess` por `SparkSubmitOperator`
    apontando para um cluster Spark real com conectividade de rede a
    partir do worker do Airflow (hoje o Spark só é alcançável via
    `docker compose exec`, que não é um padrão de submissão remota).
+
+---
+
+## Nota adicional: severidade dos quality checks (Parte 4)
+
+Não é uma das 6 perguntas do enunciado, mas é exatamente o tipo de
+decisão que a Parte 4 pede pra deixar explícita ("severidade e
+comportamento definidos — o que apenas alerta e o que para o pipeline"),
+e mudou depois da primeira entrega — vale registrar o raciocínio.
+
+**Estado atual**: `make pipeline` roda `ingest -> bronze+silver ->
+quality -> gold` inteiro, sem intervenção manual. Nenhum check está
+falhando hoje contra este dataset.
+
+Dois achados reais apareceram rodando o pipeline de ponta a ponta (não
+na leitura do código), e as duas correções aplicadas foram diferentes
+por natureza:
+
+- **`CHECK_DOMAIN_VALUES`**: a lista de `event_type` válidos não batia
+  com o que a Mock API realmente envia (faltavam `export_generated` e
+  `report_viewed`). Isso é uma correção de fato — a lista estava errada,
+  não havia trade-off nenhum em consertar.
+- **`CHECK_FRESHNESS`**: o dataset é sintético e fixo (para de ser gerado
+  em 2026-08-31) — contra o relógio real, ele sempre vai acusar staleness,
+  e isso é o comportamento *correto* do check em si. O que mudou foi a
+  **severidade**, de `critical` para `warning`. A diferença entre os dois
+  casos é importante: um `critical` de verdade sinaliza algo que a
+  *próxima execução pode corrigir* (uma duplicata, um evento fora do
+  domínio); a staleness deste dataset especificamente não tem próxima
+  execução que resolva sozinha, porque a fonte não vai voltar a gerar
+  dado novo. Deixar `critical` nessas condições não protege nada — só
+  bloqueia `gold` pra sempre sem sinal acionável novo a cada run. Rebaixar
+  pra `warning` mantém o check rodando e registrando a staleness em
+  `lakehouse.quality.check_results` a cada execução (o sinal não some do
+  log), só para de travar o pipeline.
+
+**Isso não é uma regra geral que eu aplicaria a qualquer freshness check.**
+Numa fonte que atualiza de verdade em produção — onde staleness >48h
+significa que algo quebrou de fato (job de ingestão parado, fonte fora
+do ar) — eu manteria `critical` sem pensar duas vezes, porque nesse
+cenário a próxima execução bem-sucedida da ingestão *resolve* o alerta.
+A diferença entre os dois cenários é justamente se existe uma ação
+corretiva que fecha o alerta — se existe, `critical` faz sentido; se o
+alerta é estrutural e permanente dado o ambiente, `critical` só gera
+alarme fadiga sem nunca ser "resolvido" de verdade.
