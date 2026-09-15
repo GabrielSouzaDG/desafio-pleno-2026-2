@@ -23,12 +23,24 @@ incremental, não importa o quão antigo seja o `occurred_at` deles.
 
 Onde o estado é persistido
 ---------------------------
-Arquivo JSON local (default `/tmp/watermarks.json`, sobrescrevível via env
-var `WATERMARK_FILE`). Decisão deliberada de simplicidade: neste desafio a
-ingestão roda em um único processo/host, sem necessidade de coordenação
-distribuída, e um arquivo local evita introduzir mais uma dependência de
-infraestrutura (uma tabela extra, uma conexão extra) só para guardar um
-timestamp por fonte.
+Arquivo JSON local (default `<repo>/.state/watermarks.json`, sobrescrevível
+via env var `WATERMARK_FILE`). Decisão deliberada de simplicidade: neste
+desafio a ingestão roda em um único processo/host, sem necessidade de
+coordenação distribuída, e um arquivo local evita introduzir mais uma
+dependência de infraestrutura (uma tabela extra, uma conexão extra) só
+para guardar um timestamp por fonte.
+
+O caminho é relativo ao repositório (não `/tmp` do sistema) por dois
+motivos, os dois descobertos rodando de verdade, não em teoria: (1) em
+Windows/Git Bash, `/tmp` é ambíguo — resolve pra dentro do drive atual
+(`A:\tmp\...`), não um diretório fixo, e cada ferramenta (bash vs. Python
+nativo do Windows) pode resolver esse caminho de um jeito diferente; (2)
+ficar fora do repositório significa ficar fora do alcance do `make
+clean` — um "volta pro zero" que reseta Docker/MinIO/Postgres mas deixa
+o watermark apontando pra um estado que não existe mais é pior do que não
+ter watermark nenhum (a ingestão acha que já pegou tudo, contra uma fonte
+que acabou de ser resetada pro batch 1, e não busca nada). `make clean`
+agora apaga esse arquivo também.
 
 Em produção, com múltiplos workers, múltiplas execuções concorrentes ou a
 necessidade de auditar/reprocessar o histórico de watermarks, eu moveria
@@ -57,7 +69,8 @@ DEFAULT_WATERMARK = "1970-01-01T00:00:00Z"
 # Usar o epoch como default garante que a primeira execução é, na prática,
 # uma carga completa da fonte — que é o comportamento correto para "nunca
 # ingerido antes".
-DEFAULT_PATH = os.environ.get("WATERMARK_FILE", "/tmp/watermarks.json")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_PATH = os.environ.get("WATERMARK_FILE", os.path.join(_REPO_ROOT, ".state", "watermarks.json"))
 
 
 class _FileLock:

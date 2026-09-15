@@ -32,9 +32,10 @@ up: seed ## sobe todo o ambiente
 down: ## derruba os containers (mantem os dados)
 	docker compose down
 
-clean: ## derruba tudo e APAGA os volumes (MinIO, Postgres, Iceberg)
+clean: ## derruba tudo e APAGA os volumes (MinIO, Postgres, Iceberg) + o watermark local
 	docker compose down -v
 	rm -f mock-api/data/.batch_state
+	rm -rf .state
 
 restart: clean up ## ambiente do zero
 
