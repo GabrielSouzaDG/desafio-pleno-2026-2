@@ -3,7 +3,7 @@ name: desafio-lakehouse
 services:
   # ------------------------------------------------------------ object store
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: dl-minio
     command: server /data --console-address ":9001"
     environment:
@@ -24,7 +24,7 @@ services:
 
   # cria os buckets e encerra
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: dl-minio-init
     depends_on:
       minio: {condition: service_healthy}

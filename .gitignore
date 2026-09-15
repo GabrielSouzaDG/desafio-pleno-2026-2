@@ -9,6 +9,9 @@ venv/
 # estado local da Mock API
 mock-api/data/.batch_state
 
+# estado local da ingestao (watermark) -- ver ingestion/watermark.py
+.state/
+
 # artefatos gerados
 seed/postgres/02_customers.sql
 seed/postgres/03_batch2.sql

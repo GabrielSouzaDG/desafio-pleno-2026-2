@@ -2,6 +2,31 @@
 SHELL := /bin/bash
 API_KEY ?= desafio-2026
 
+# No Git Bash/MSYS (Windows), argumentos de linha de comando que PARECEM
+# um caminho absoluto Unix (ex.: "-f /seed/03_batch2.sql") sao reescritos
+# automaticamente para um caminho Windows ANTES de chegar no `docker`,
+# porque `docker.exe` e um binario nativo do Windows, nao MSYS -- vira
+# algo como "C:/Program Files/Git/seed/03_batch2.sql", que obviamente nao
+# existe dentro do container Linux. MSYS_NO_PATHCONV=1 desliga essa
+# conversao. Inofensivo em Linux/Mac (a variavel simplesmente nao
+# significa nada la). Achado rodando `make batch2` de verdade, pelo
+# Git Bash, sem nenhum atalho manual.
+export MSYS_NO_PATHCONV := 1
+
+# Carrega o .env (se existir) e EXPORTA todas as variaveis pro ambiente de
+# toda recipe deste Makefile. Sem isso, "docker compose" ve o .env
+# automaticamente (comportamento nativo dele), mas alvos que rodam Python
+# direto no host (ingest, test) NAO viam nada do .env -- PG_PORT=55432,
+# por exemplo, era ignorado por `ingestion/postgres_client.py`, e
+# `make ingest`/`make pipeline` quebravam com psycopg2.OperationalError
+# em qualquer maquina com esse conflito de porta. So achei isso rodando
+# `make pipeline` de verdade (nao bastava eu ter testado o script Python
+# direto, com a variavel exportada na mao).
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
 help: ## mostra esta ajuda
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
@@ -12,15 +37,24 @@ up: seed ## sobe todo o ambiente
 	docker compose up -d --build
 	@echo ""
 	@echo "Aguardando os servicos ficarem prontos..."
-	@sleep 25
-	@$(MAKE) --no-print-directory check
+	@sleep 15
+	@for i in 1 2 3; do \
+		if $(MAKE) --no-print-directory check; then exit 0; fi; \
+		echo ""; \
+		echo ">> ambiente ainda subindo, tentando de novo em 15s (tentativa $$i/3)..."; \
+		sleep 15; \
+	done; \
+	echo ""; \
+	echo "Ambiente nao ficou pronto a tempo. Rode 'make check' manualmente ou 'make logs' para investigar."; \
+	exit 1
 
 down: ## derruba os containers (mantem os dados)
 	docker compose down
 
-clean: ## derruba tudo e APAGA os volumes (MinIO, Postgres, Iceberg)
+clean: ## derruba tudo e APAGA os volumes (MinIO, Postgres, Iceberg) + o watermark local
 	docker compose down -v
 	rm -f mock-api/data/.batch_state
+	rm -rf .state
 
 restart: clean up ## ambiente do zero
 
@@ -102,4 +136,28 @@ airflow: ## sobe o Airflow (perfil opcional) em http://localhost:8081
 api-docs: ## lembra a URL da documentacao da Mock API
 	@echo "http://localhost:8000/docs  (header X-API-Key: $(API_KEY))"
 
-.PHONY: help seed up down clean restart ps logs check rebuild-spark test-infra test-infra-fast batch2 reset-batch batch-state spark pyspark spark-sql trino psql airflow api-docs
+ingest: ## roda a ingestao completa (Mock API + Postgres -> raw zone no MinIO)
+	python3 -m ingestion.ingest
+
+transform: ## roda bronze e silver em sequencia (dentro do container Spark)
+	docker compose exec -T spark spark-submit /home/iceberg/work/transform/bronze.py
+	docker compose exec -T spark spark-submit /home/iceberg/work/transform/silver.py
+
+quality: ## roda os checks de qualidade e persiste o resultado (para o pipeline se algum critical falhar)
+	docker compose exec -T spark spark-submit /home/iceberg/work/quality/checks.py
+
+gold: ## roda as tabelas gold (dentro do container Spark) -- so faz sentido depois de "quality" passar
+	docker compose exec -T spark spark-submit /home/iceberg/work/transform/gold.py
+
+pipeline: ingest transform quality gold ## roda o pipeline completo: ingest -> bronze+silver -> quality -> gold
+	@echo "pipeline completo. Se chegou aqui, nenhum quality check critical falhou."
+
+test: ## roda os testes que nao precisam de Spark (host, requer requirements.txt instalado)
+	python3 -m pytest tests/test_ingestion.py -v
+
+test-transforms: ## roda os testes que precisam de Spark+Iceberg (dentro do container Spark)
+	docker compose exec -T spark python3 -m pytest /home/iceberg/work/tests/test_transforms.py -v
+
+test-all: test test-transforms ## roda a suite inteira (host + container Spark)
+
+.PHONY: help seed up down clean restart ps logs check rebuild-spark test-infra test-infra-fast batch2 reset-batch batch-state spark pyspark spark-sql trino psql airflow api-docs ingest transform quality gold pipeline test test-transforms test-all

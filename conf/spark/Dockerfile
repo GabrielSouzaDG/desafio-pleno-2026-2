@@ -37,6 +37,39 @@ nomes = zipfile.ZipFile(jars[0]).namelist(); \
 sys.exit('S3AFileSystem ausente em ' + jars[0]) if alvo not in nomes else None; \
 print('>> OK: S3AFileSystem presente em', jars[0])"
 
+# A imagem base tem um defeito conhecido (confirmado rodando de verdade,
+# inclusive apos `--no-cache --pull`): o JDK dela (openjdk-17-jre-headless,
+# via apt) tem o arquivo lib/modules TRUNCADO em exatamente 20971520 bytes
+# (deveria ter ~130MB+). Isso nao aparece em `java -version`, mas quebra
+# QUALQUER carregamento de classe de java.util.logging.* via reflexao --
+# inclusive o proprio spark-submit, que falha logo no startup com
+# "ClassFormatError: Truncated class file" / "Incompatible magic value" ao
+# inicializar org.apache.spark.internal.Logging. Como o arquivo tem sempre
+# o mesmo tamanho exato mesmo pos rebuild com pull forcado, e um defeito da
+# propria imagem tabulario/spark-iceberg:latest publicada, nao algo local
+# desta maquina. Correcao: baixar um JDK 17 valido (Temurin) e usa-lo como
+# JAVA_HOME em vez do que veio via apt na imagem base.
+ARG TEMURIN_JDK_URL=https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz
+
+RUN set -eux; \
+    mkdir -p /opt/temurin17; \
+    curl -fsSL "${TEMURIN_JDK_URL}" | tar -xz -C /opt/temurin17 --strip-components=1; \
+    MODULES_SIZE="$(stat -c%s /opt/temurin17/lib/modules)"; \
+    echo ">> Temurin lib/modules: ${MODULES_SIZE} bytes"; \
+    test "$MODULES_SIZE" -gt 50000000
+
+ENV JAVA_HOME=/opt/temurin17
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# pytest para tests/test_transforms.py (make test-transforms). NAO estava
+# aqui originalmente -- eu tinha instalado na mao dentro do container
+# rodando, e isso nao sobrevive a um `docker compose build`/`make clean`.
+# So apareceu ao validar o projeto do zero (make clean && make up):
+# test-transforms falhava com "No module named pytest" num container
+# recem-criado. Fica no Dockerfile para nao depender de rede no momento
+# do teste nem de um passo manual documentado à parte.
+RUN pip install --no-cache-dir pytest==8.3.3
+
 # NAO definir WORKDIR aqui: o ENTRYPOINT da imagem base e "./entrypoint.sh",
 # um caminho relativo. Mudar o diretorio de trabalho quebra a inicializacao com
 # 'stat ./entrypoint.sh: no such file or directory'. Herdamos o WORKDIR da base.
