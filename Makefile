@@ -37,8 +37,16 @@ up: seed ## sobe todo o ambiente
 	docker compose up -d --build
 	@echo ""
 	@echo "Aguardando os servicos ficarem prontos..."
-	@sleep 25
-	@$(MAKE) --no-print-directory check
+	@sleep 15
+	@for i in 1 2 3; do \
+		if $(MAKE) --no-print-directory check; then exit 0; fi; \
+		echo ""; \
+		echo ">> ambiente ainda subindo, tentando de novo em 15s (tentativa $$i/3)..."; \
+		sleep 15; \
+	done; \
+	echo ""; \
+	echo "Ambiente nao ficou pronto a tempo. Rode 'make check' manualmente ou 'make logs' para investigar."; \
+	exit 1
 
 down: ## derruba os containers (mantem os dados)
 	docker compose down
