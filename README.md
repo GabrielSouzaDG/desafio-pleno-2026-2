@@ -151,12 +151,31 @@ ORDER BY executed_at DESC;
 ### DAG do Airflow
 
 `dags/lakehouse_pipeline.py` **não roda de fábrica** neste compose — o
-serviço `airflow` opcional é uma imagem `apache/airflow` baunilha, sem
-PySpark/Java/jars do Iceberg, e sem um cluster Spark exposto para
-submissão remota (só é alcançável via `docker compose exec`). Isso é
-esperado — o próprio enunciado (seção 5) diz que a DAG não precisa rodar
-no ambiente, contanto que o desenho esteja explicado (ver
-[ARCHITECTURE.md](ARCHITECTURE.md) e o docstring do próprio arquivo).
+serviço `airflow` opcional é uma imagem `apache/airflow` baunilha, com
+duas lacunas reais (confirmadas disparando um run de verdade, não só
+lendo o código):
+
+1. **Bronze/silver/gold**: sem PySpark/Java/jars do Iceberg, e sem um
+   cluster Spark exposto para submissão remota (`_run_spark_submit` chama
+   `spark-submit` como subprocesso — o binário não existe nesse container;
+   o Spark só é alcançável via `docker compose exec` a partir do host).
+2. **Ingestão**: o compose só monta `./dags` no container (`volumes:` do
+   serviço `airflow`), não o resto do repositório — `task_ingest_api`/
+   `task_ingest_postgres` falham com `ModuleNotFoundError: No module
+   named 'ingestion'` assim que tentam `from ingestion.ingest import ...`.
+   Com `retries=5` e `retry_delay` crescente, isso aparenta "task rodando
+   há minutos" na UI quando na real cada tentativa falha em menos de 1s —
+   só o Airflow esperando pra tentar de novo.
+
+Ambas são esperadas — o próprio enunciado (seção 5) diz que a DAG não
+precisa rodar no ambiente, contanto que o desenho esteja explicado (ver
+[ARCHITECTURE.md](ARCHITECTURE.md) e o docstring do próprio arquivo). Por
+esse motivo a DAG fica **pausada** por padrão: como `catchup=True` e
+`start_date=2026-01-01`, despausá-la faz o Airflow tentar fazer backfill
+de todo dia desde então — nesse dataset (hoje = 2026-09-15), seriam ~258
+execuções diárias enfileiradas, uma atrás da outra, todas batendo no
+mesmo erro de import. Se quiser ver a UI processando um run, prefira
+"Trigger DAG" manual (um run só) a despausar.
 
 O que É validado de verdade: o parsing da DAG, com o Airflow standalone
 do próprio compose.
