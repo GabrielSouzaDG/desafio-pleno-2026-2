@@ -1,0 +1,20 @@
+# Este projeto roda dentro de containers Linux (scripts de shell executados
+# como entrypoint/comando de container, Makefile via bash, Python, SQL).
+# Forcar LF em todo checkout evita que o autocrlf do Git no Windows quebre
+# scripts executados dentro dos containers (ex.: minio-init.sh falhando com
+# "set: -: invalid option" por causa de CRLF) -- isso ja aconteceu de
+# verdade neste repo, mais de uma vez, em checkouts diferentes.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.sql  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+
+# Binarios/imagens nao passam por conversao de linha.
+*.png binary
+*.jpg binary
+*.gz  binary
